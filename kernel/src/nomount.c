@@ -958,7 +958,7 @@ static inline int nomount_hijack_dir_ops(struct nomount_dir_node *dir_node, stru
 
     if ((ops = nm_get_nm_iop(iop)) || (ops = nm_get_nm_fop(fop))) {
         if (ops->dir_node != dir_node) return -EBUSY;
-        return nomount_hijack_superblock(inode->i_sb);
+        return 0;
     }
     if (!iop && !iterate) return -EOPNOTSUPP;
     if (!(ops = kmalloc(sizeof(*ops), GFP_KERNEL))) return -ENOMEM;
