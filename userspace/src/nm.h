@@ -147,6 +147,7 @@ struct nm_args {
     int data_start_idx;
     int is_json;
     int is_whiteout;
+    int is_no_anchor;
     unsigned int target_uid;
 };
 

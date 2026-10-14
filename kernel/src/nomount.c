@@ -1194,44 +1194,60 @@ static int nm_prepare_rule(const char *r_path, u16 r_len, u32 flags, unsigned in
     return 0;
 }
 
-static struct nomount_leaf *nm_alloc_leaf(const char *path, u16 len, u32 flags)
+static struct nomount_leaf *nm_alloc_leaf(const char *path, u16 len)
 {
     struct nomount_leaf *leaf = kzalloc(sizeof(*leaf) + len + 1, GFP_KERNEL);
-    struct path anchor;
-
     if (!leaf) return ERR_PTR(-ENOMEM);
+
     memcpy(leaf->paths, path, len);
     leaf->v_len = len;
     leaf->v_hash = full_name_hash((const void *)(unsigned long)NOMOUNT_MAGIC_SIG, path, len);
     leaf->v_ino = (unsigned long)leaf->v_hash;
-    if (!kern_path(leaf->paths, LOOKUP_FOLLOW, &anchor)) {
-        struct inode *inode = d_backing_inode(anchor.dentry);
-        leaf->v_ino = inode->i_ino;
-        d_drop(anchor.dentry);
-        if (S_ISDIR(inode->i_mode) && inode->i_op != &nm_dir_iops) {
-            struct nm_dir_ops *iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
-            struct nm_dir_ops *fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
-            struct nomount_dir_node *dir = iop ? iop->dir_node : (fop ? fop->dir_node : NULL);
-            if (dir && !dir->owner) {
-                leaf->this_dir = dir;
-                atomic_inc(&dir->refs);
-            }
-            leaf->anchor = anchor;
-            flags |= NM_FLAG_IS_DIR;
-        } else {
-            path_put(&anchor);
-        }
-    }
-    if ((flags & NM_FLAG_IS_DIR) && !leaf->this_dir) {
-        leaf->this_dir = __nomount_alloc_dir_node();
-        if (!leaf->this_dir) {
-            if (leaf->anchor.dentry) path_put(&leaf->anchor);
-            kfree(leaf);
-            return ERR_PTR(-ENOMEM);
-        }
-    }
-    if (leaf->this_dir) leaf->this_dir->owner = leaf;
     return leaf;
+}
+
+static int nm_resolve_anchor_locked(struct nomount_leaf *leaf, bool force_dir)
+{
+    struct path anchor;
+    struct inode *inode;
+    struct nm_dir_ops *iop, *fop;
+    struct nomount_dir_node *dir;
+
+    if (kern_path(leaf->paths, LOOKUP_FOLLOW, &anchor)) {
+        if (force_dir) {
+            leaf->this_dir = __nomount_alloc_dir_node();
+            if (!leaf->this_dir) return -ENOMEM;
+            leaf->this_dir->owner = leaf;
+        }
+        return 0;
+    }
+
+    inode = d_backing_inode(anchor.dentry);
+    if (!inode || !S_ISDIR(inode->i_mode)) {
+        path_put(&anchor);
+        return 0;
+    }
+
+    leaf->v_ino = inode->i_ino;
+    d_drop(anchor.dentry);
+    leaf->anchor = anchor;
+
+    if (inode->i_op != &nm_dir_iops) {
+        iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
+        fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
+        dir = iop ? iop->dir_node : (fop ? fop->dir_node : NULL);
+        if (dir && !dir->owner) {
+            leaf->this_dir = dir;
+            atomic_inc(&dir->refs);
+            dir->owner = leaf;
+            return 0;
+        }
+    }
+
+    leaf->this_dir = __nomount_alloc_dir_node();
+    if (!leaf->this_dir) return -ENOMEM;
+    leaf->this_dir->owner = leaf;
+    return 0;
 }
 
 static void nm_free_leaf(struct nomount_leaf *leaf)
@@ -1325,8 +1341,15 @@ static int nomount_generate_virtual_topology(struct nomount_leaf *target, unsign
             break;
         }
 
-        parent = nm_alloc_leaf(target->paths, parent_len, NM_FLAG_IS_DIR);
+        parent = nm_alloc_leaf(target->paths, parent_len);
         if (IS_ERR(parent)) { err = PTR_ERR(parent); break; }
+
+        if (!(parent->this_dir = __nomount_alloc_dir_node())) {
+            nm_free_leaf(parent);
+            err = -ENOMEM;
+            break;
+        }
+        parent->this_dir->owner = parent;
         struct nm_rule_array *rules = nm_alloc_rule_array(1, 1);
         if (!rules) {
             err = -ENOMEM;
@@ -1411,9 +1434,18 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
     while (v_len > 1 && v_path[v_len - 1] == '/') v_len--;
 
     fresh = !(leaf = nm_find_leaf(v_path, v_len));
-    if (fresh && IS_ERR((leaf = nm_alloc_leaf(v_path, v_len, new_rule.flags)))) {
+    if (fresh && IS_ERR((leaf = nm_alloc_leaf(v_path, v_len)))) {
         err = PTR_ERR(leaf);
         goto out_rule;
+    }
+
+    if (fresh) {
+        if (new_rule.flags & NM_FLAG_IS_DIR) {
+            if ((err = nm_resolve_anchor_locked(leaf, true))) {
+                nm_free_leaf(leaf);
+                goto out_rule;
+            }
+        }
     }
 
     count = (old = rcu_dereference_protected(leaf->rules, lockdep_is_held(&nomount_mutex))) ? old->count : 0;
