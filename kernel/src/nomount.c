@@ -64,15 +64,13 @@ static __always_inline struct nomount_leaf *nomount_bsearch_child(struct nomount
 static struct nm_rule *nm_select_rule(struct nomount_leaf *leaf, unsigned int uid)
 {
     struct nm_rule_array *arr = rcu_dereference_check(leaf->rules, lockdep_is_held(&nomount_mutex));
-    struct nm_rule *fallback = NULL;
     if (!arr) return NULL;
     for (int i = 0; i < arr->count; i++) {
         struct nm_rule *r = &arr->rules[i];
         if (r->target_uid == uid) return r;
-        if (!r->target_uid) fallback = r;
         if (r->target_uid > uid) break;
     }
-    return fallback;
+    return !arr->rules[0].target_uid ? &arr->rules[0] : NULL;
 }
 
 static struct nm_rule *nm_lookup_rule(struct nomount_dir_node *dir_node, const char *name, size_t len, uid_t fsuid, struct nomount_leaf **leaf_out)
