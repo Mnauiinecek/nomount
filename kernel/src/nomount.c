@@ -692,9 +692,8 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
     if (unlikely(nomount_is_uid_blocked(fsuid)))
         goto negative_dentry;
 
-    if (info->dir_node)
-        if ((dir_node = READ_ONCE(info->dir_node)) && nm_resolve_rule(dir_node, dentry->d_name.name, dentry->d_name.len, fsuid, &rule_info))
-            return nm_materialize_rule(dir, dentry, &rule_info);
+    if ((dir_node = READ_ONCE(info->dir_node)) && nm_resolve_rule(dir_node, dentry->d_name.name, dentry->d_name.len, fsuid, &rule_info))
+        return nm_materialize_rule(dir, dentry, &rule_info);
 
     if (!info->r_path.dentry)
         goto negative_dentry;
@@ -1204,7 +1203,7 @@ static struct nomount_leaf *nm_alloc_leaf(const char *path, u16 len)
     return leaf;
 }
 
-static int nm_resolve_anchor_locked(struct nomount_leaf *leaf, bool force_dir)
+static int nm_resolve_anchor_locked(struct nomount_leaf *leaf)
 {
     struct path anchor;
     struct inode *inode;
@@ -1212,11 +1211,9 @@ static int nm_resolve_anchor_locked(struct nomount_leaf *leaf, bool force_dir)
     struct nomount_dir_node *dir;
 
     if (kern_path(leaf->paths, LOOKUP_FOLLOW, &anchor)) {
-        if (force_dir) {
-            leaf->this_dir = __nomount_alloc_dir_node();
-            if (!leaf->this_dir) return -ENOMEM;
-            leaf->this_dir->owner = leaf;
-        }
+        leaf->this_dir = __nomount_alloc_dir_node();
+        if (!leaf->this_dir) return -ENOMEM;
+        leaf->this_dir->owner = leaf;
         return 0;
     }
 
@@ -1467,12 +1464,10 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
         goto out_rule;
     }
 
-    if (fresh) {
-        if (new_rule.flags & NM_FLAG_IS_DIR) {
-            if ((err = nm_resolve_anchor_locked(leaf, true))) {
-                nm_free_leaf(leaf);
-                goto out_rule;
-            }
+    if (fresh && (new_rule.flags & NM_FLAG_IS_DIR)) {
+        if ((err = nm_resolve_anchor_locked(leaf))) {
+            nm_free_leaf(leaf);
+            goto out_rule;
         }
     }
 
