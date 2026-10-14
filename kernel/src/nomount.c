@@ -1259,17 +1259,55 @@ static void nm_free_leaf(struct nomount_leaf *leaf)
     kfree(leaf);
 }
 
-static void nm_rule_array_free(struct rcu_head *head)
+static void nm_rule_array_free(struct nm_rule_array *arr)
 {
-    struct nm_rule_array *arr = container_of(head, struct nm_rule_array, rcu);
     for (int i = 0; i < arr->count; i++)
         if (arr->rules[i].r_path.dentry) path_put(&arr->rules[i].r_path);
     kfree(arr);
 }
 
-static void nm_leaf_rcu_free(struct rcu_head *head)
+static void nm_reclaim(struct work_struct *work)
 {
-    nm_free_leaf(container_of(head, struct nomount_leaf, rcu));
+    struct nm_rule_array *arrays;
+    struct nomount_leaf *leaves;
+    mutex_lock(&nomount_mutex);
+    arrays = nomount_retired_arrays;
+    leaves = nomount_retired_leaves;
+    nomount_retired_arrays = NULL;
+    nomount_retired_leaves = NULL;
+    mutex_unlock(&nomount_mutex);
+    if (!arrays && !leaves) return;
+
+    synchronize_rcu();
+    while (arrays) {
+        struct nm_rule_array *arr = arrays;
+        arrays = arr->next;
+        nm_rule_array_free(arr);
+    }
+    while (leaves) {
+        struct nomount_leaf *leaf = leaves;
+        leaves = leaf->next;
+        nm_free_leaf(leaf);
+    }
+}
+
+static DECLARE_WORK(nomount_reclaim_work, nm_reclaim);
+
+static void nm_retire_array(struct nm_rule_array *arr)
+{
+    arr->next = nomount_retired_arrays;
+    nomount_retired_arrays = arr;
+    schedule_work(&nomount_reclaim_work);
+}
+
+static void nm_retire_leaf(struct nomount_leaf *leaf)
+{
+    struct nm_rule_array *array = rcu_dereference_protected(leaf->rules, lockdep_is_held(&nomount_mutex));
+    RCU_INIT_POINTER(leaf->rules, NULL);
+    leaf->next = nomount_retired_leaves;
+    nomount_retired_leaves = leaf;
+    if (array) nm_retire_array(array);
+    else schedule_work(&nomount_reclaim_work);
 }
 
 static int nomount_generate_virtual_topology(struct nomount_leaf *target, unsigned int uid)
@@ -1377,20 +1415,13 @@ static int nomount_generate_virtual_topology(struct nomount_leaf *target, unsign
     return err;
 }
 
-static void nm_retire_rules(struct nomount_leaf *leaf)
-{
-    struct nm_rule_array *array = rcu_dereference_protected(leaf->rules, lockdep_is_held(&nomount_mutex));
-    RCU_INIT_POINTER(leaf->rules, NULL);
-    if (array) call_rcu(&array->rcu, nm_rule_array_free);
-}
-
 static struct nomount_dir_node *nm_detach_leaf_locked(struct nomount_leaf *leaf)
 {
     struct nomount_dir_node *parent = __nomount_delete_child_locked(leaf, false);
     if (IS_ERR(parent)) return parent;
     if (leaf->this_dir) leaf->this_dir->owner = NULL;
     hash_del_rcu(&leaf->ht_node);
-    call_rcu(&leaf->rcu, nm_leaf_rcu_free);
+    nm_retire_leaf(leaf);
     return parent;
 }
 
@@ -1402,7 +1433,6 @@ static int nomount_prune_empty_virtual_dirs(struct nomount_dir_node *dir)
         if (rules && (rules->count != 1 || !(rules->rules[0].flags & NM_FLAG_VIRTUAL_DIR))) break;
         dir = nm_detach_leaf_locked(leaf);
         if (IS_ERR(dir)) return PTR_ERR(dir);
-        nm_retire_rules(leaf);
     }
     return 0;
 }
@@ -1505,9 +1535,7 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
     if (fresh) {
         RCU_INIT_POINTER(leaf->rules, array);
         if ((err = nomount_generate_virtual_topology(leaf, uid))) {
-            for (int i = 0; i < array->count; i++)
-                if (array->rules[i].r_path.dentry) path_put(&array->rules[i].r_path);
-            kfree(array);
+            nm_rule_array_free(array);
             nm_free_leaf(leaf);
             return err;
         }
@@ -1515,7 +1543,7 @@ static int __nomount_add_rule(const char *v_path, const char *r_path, u16 v_len,
     } else {
         if (new_dir) { leaf->this_dir = new_dir; new_dir->owner = leaf; }
         rcu_assign_pointer(leaf->rules, array);
-        if (old) call_rcu(&old->rcu, nm_rule_array_free);
+        if (old) nm_retire_array(old);
     }
 
     return 0;
@@ -1550,8 +1578,6 @@ static int __nomount_del_rule(const char *path, u16 len, unsigned int uid)
     if (!stub_virtual && old->count == 1 && (!leaf->this_dir || !rcu_access_pointer(leaf->this_dir->children))) {
         parent = nm_detach_leaf_locked(leaf);
         if (IS_ERR(parent)) return PTR_ERR(parent);
-        call_rcu(&old->rcu, nm_rule_array_free);
-        rcu_assign_pointer(leaf->rules, NULL);
         return parent ? nomount_prune_empty_virtual_dirs(parent) : 0;
     }
 
@@ -1586,7 +1612,7 @@ static int __nomount_del_rule(const char *path, u16 len, unsigned int uid)
     }
 
     rcu_assign_pointer(leaf->rules, array);
-    call_rcu(&old->rcu, nm_rule_array_free);
+    nm_retire_array(old);
     return parent ? nomount_prune_empty_virtual_dirs(parent) : 0;
 }
 
@@ -1605,8 +1631,7 @@ static void __nomount_clear_all(int clear_flags)
             __nomount_delete_child_locked(leaf, true);
             if (leaf->this_dir) leaf->this_dir->owner = NULL;
             hash_del_rcu(&leaf->ht_node);
-            nm_retire_rules(leaf);
-            call_rcu(&leaf->rcu, nm_leaf_rcu_free);
+            nm_retire_leaf(leaf);
         }
     }
     if (clear_flags & NM_CLEAR_EXIT) nomount_restore_superblocks();
@@ -1809,6 +1834,7 @@ static void __exit nomount_exit(void)
     mutex_lock(&nomount_mutex);
     __nomount_clear_all(NM_CLEAR_UIDS | NM_CLEAR_RULES | NM_CLEAR_EXIT);
     mutex_unlock(&nomount_mutex);
+    flush_work(&nomount_reclaim_work);
     rcu_barrier();
     nm_info("Unloaded successfully\n");
 }

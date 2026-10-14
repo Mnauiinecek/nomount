@@ -6,6 +6,7 @@
 #include <linux/list.h>
 #include <linux/hashtable.h>
 #include <linux/rcupdate.h>
+#include <linux/workqueue.h>
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
 #include <linux/file.h>
@@ -41,6 +42,8 @@ static struct nm_uid_array __rcu *nomount_uids = NULL;
 static DEFINE_HASHTABLE(nomount_leaves_ht, 6);
 static DEFINE_MUTEX(nomount_mutex);
 static LIST_HEAD(nomount_sb_list);
+static struct nm_rule_array *nomount_retired_arrays;
+static struct nomount_leaf *nomount_retired_leaves;
 
 /* * Helpers to dynamically calculate the memory address of the strings / structs */
 #define nm_get_child_name(leaf) ((leaf)->paths + (leaf)->v_len - (leaf)->child_len)
@@ -104,7 +107,7 @@ struct nm_rule {
 };
 
 struct nm_rule_array {
-    struct rcu_head rcu;
+    struct nm_rule_array *next;
     int count;
     struct nm_rule rules[];
 };
@@ -119,7 +122,7 @@ struct nomount_leaf {
     u16 v_len;
     u16 child_len;
     struct hlist_node ht_node;
-    struct rcu_head rcu;
+    struct nomount_leaf *next;
     char paths[];
 };
 
