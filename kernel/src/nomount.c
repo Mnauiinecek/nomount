@@ -34,7 +34,7 @@ static __always_inline bool nm_is_uid_blocked(uid_t target_uid)
 
 static __always_inline bool nm_child_matches(struct nm_leaf *leaf, const char *name, size_t len)
 {
-    if (unlikely(!leaf || leaf->child_len != len)) return false;
+    if (unlikely(leaf->child_len != len)) return false;
     const char *child_name = nm_get_child_name(leaf);
     return child_name[0] == name[0] && child_name[len - 1] == name[len - 1] && !memcmp(child_name, name, len);
 }
@@ -173,7 +173,7 @@ static NM_ACTOR_RET nm_actor_proxy(struct dir_context *ctx, const char *name, in
     struct dir_context *orig_ctx = proxy->orig_ctx;
     NM_ACTOR_RET ret;
 
-    if (likely(proxy->dir_node != NULL)) {
+    {
         rcu_guard();
         if (unlikely(nm_lookup_rule(proxy->dir_node, name, namelen, proxy->fsuid, NULL) != NULL)) {
             proxy->ctx.pos = offset;
@@ -1184,7 +1184,7 @@ static int nm_prepare_rule(const char *r_path, u16 r_len, u32 flags, unsigned in
         int err = kern_path(r_path, LOOKUP_FOLLOW, &out->r_path);
         if (err) { memset(out, 0, sizeof(*out)); return err; }
         struct inode *inode = d_backing_inode(out->r_path.dentry);
-        if (inode && S_ISDIR(inode->i_mode)) out->flags |= NM_FLAG_IS_DIR;
+        if (S_ISDIR(inode->i_mode)) out->flags |= NM_FLAG_IS_DIR;
     }
     return 0;
 }
@@ -1216,7 +1216,7 @@ static int nm_resolve_anchor_locked(struct nm_leaf *leaf)
     }
 
     inode = d_backing_inode(anchor.dentry);
-    if (!inode || !S_ISDIR(inode->i_mode)) {
+    if (!S_ISDIR(inode->i_mode)) {
         path_put(&anchor);
         return 0;
     }
