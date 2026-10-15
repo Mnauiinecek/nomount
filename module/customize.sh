@@ -7,6 +7,11 @@ ui_print " "
 
 ui_print "- Device Architecture: $ARCH"
 
+# KernelSU reports x86_64 devices as "x64", Magisk as "x86_64"
+ARCH_BIN="$ARCH"
+[ "$ARCH_BIN" = "x64" ] && ARCH_BIN="x86_64"
+
+# Check root implementation
 if [ "$KSU" = "true" ] || command -v ksud >/dev/null 2>&1 || [ -x /data/adb/ksu/bin/ksud ]; then
   ROOT_IMP=ksu
   ui_print "- Root implementation: KernelSU"
@@ -17,10 +22,10 @@ else
   abort "! Unsupported root env"
 fi
 
-if [ ! -f "$MODPATH/bin/nm-$ARCH" ]; then
+if [ ! -f "$MODPATH/bin/nm-$ARCH_BIN" ]; then
   abort "! Unsupported architecture: $ARCH"
 fi
-mv "$MODPATH/bin/nm-$ARCH" "$MODPATH/bin/nm"
+mv "$MODPATH/bin/nm-$ARCH_BIN" "$MODPATH/bin/nm"
 set_perm "$MODPATH/bin/nm" 0 0 0755
 
 mkdir -p "/data/adb/$ROOT_IMP/bin"
@@ -30,7 +35,7 @@ else
   ui_print "! Failed to create 'nm' symlink, skipping.."
 fi
 
-mv "$MODPATH/bin/lkmloader-$ARCH" "$MODPATH/lkm/lkmloader"
+mv "$MODPATH/bin/lkmloader-$ARCH_BIN" "$MODPATH/lkm/lkmloader"
 set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
 
@@ -53,6 +58,8 @@ try_load_ko() {
 OLD_MODPATH="/data/adb/modules/nomount"
 KVER=$(uname -r | cut -d'.' -f1,2)
 AKVER=$(uname -r | grep -oE 'android[0-9]+')
+ARCH_SFX=""
+[ "$ARCH_BIN" = "x86_64" ] && ARCH_SFX="-x86_64"
 
 if [ -n "$AKVER" ]; then
   ui_print "- Detected Kernel: $KVER ($AKVER branch)"
@@ -89,13 +96,13 @@ elif [ "$LKM_RUNNING" = true ]; then
   ui_print "  [*] Active LKM detected."
   ui_print "  [*] Verifying new driver (no unload)..."
 
-  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}.ko"
+  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}${ARCH_SFX}.ko"
   CANDIDATE=""
 
   if [ -n "$AKVER" ] && [ -f "$EXACT" ]; then
     CANDIDATE="$EXACT"
   else
-    for mod in "$MODPATH"/lkm/nomount*-${KVER}.ko; do
+    for mod in "$MODPATH"/lkm/nomount*-${KVER}${ARCH_SFX}.ko; do
       [ -f "$mod" ] || continue
       CANDIDATE="$mod"
       break
@@ -125,13 +132,13 @@ elif [ "$LKM_RUNNING" = true ]; then
 else
   ui_print "  [*] Built-in support not found. Attempting LKM injection..."
 
-  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}.ko"
+  EXACT="$MODPATH/lkm/nomount-${AKVER}-${KVER}${ARCH_SFX}.ko"
   CANDIDATE=""
 
   if [ -n "$AKVER" ] && [ -f "$EXACT" ]; then
     CANDIDATE="$EXACT"
   else
-    for mod in "$MODPATH"/lkm/nomount*-${KVER}.ko; do
+    for mod in "$MODPATH"/lkm/nomount*-${KVER}${ARCH_SFX}.ko; do
       [ -f "$mod" ] || continue
       CANDIDATE="$mod"
       break
