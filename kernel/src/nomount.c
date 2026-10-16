@@ -253,7 +253,7 @@ static bool nm_inode_matches_binding(struct inode *inode, const struct path *pat
     if (!info || info->dir_node != dir_node || !path_equal(&info->r_path, path))
         return false;
     r_inode = path->dentry ? d_backing_inode(path->dentry) : NULL;
-    return !r_inode || (inode->i_state & I_NEW) ||
+    return !r_inode || nm_inode_is_new(inode) ||
            (inode->i_mode == r_inode->i_mode && uid_eq(inode->i_uid, r_inode->i_uid) &&
             gid_eq(inode->i_gid, r_inode->i_gid));
 }
@@ -262,8 +262,7 @@ static int nm_cached_inode_set(struct inode *inode, void *data) { return 0; }
 static int nm_cached_inode_test(struct inode *inode, void *data)
 {
     struct nm_inode_info *info = data;
-    return inode->i_op == &nm_dir_iops &&
-           nm_inode_matches_binding(inode, &info->r_path, info->dir_node);
+    return inode->i_op == &nm_dir_iops && nm_inode_matches_binding(inode, &info->r_path, info->dir_node);
 }
 
 static struct dentry *nm_materialize_rule(struct inode *dir, struct dentry *dentry, struct nm_rule_info *rule_info)
@@ -284,7 +283,7 @@ static struct dentry *nm_materialize_rule(struct inode *dir, struct dentry *dent
         probe.dir_node = rule_info->this_dir;
         inode = iget5_locked(dir->i_sb, (unsigned long)rule_info->this_dir, nm_cached_inode_test, nm_cached_inode_set, &probe);
         if (!inode) goto out;
-        if (!(inode->i_state & I_NEW)) {
+        if (!nm_inode_is_new(inode)) {
             res = d_splice_alias(inode, dentry);
             goto out;
         }
