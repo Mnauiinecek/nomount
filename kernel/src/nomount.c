@@ -300,7 +300,8 @@ static struct dentry *nm_materialize_rule(struct inode *dir, struct dentry *dent
     info->dir_node = NULL;
     if (!(inode = new_inode(dir->i_sb))) goto out;
     nm_init_prealloc_inode(inode, info, rule_info->v_ino);
-    return d_splice_alias(inode, dentry);
+    d_add(dentry, inode);
+    return NULL;
 
 out:
     kfree(info);
