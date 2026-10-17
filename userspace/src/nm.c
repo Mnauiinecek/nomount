@@ -16,16 +16,17 @@ void c_main(long *sp) {
     parse_arguments(argc, argv, &args);
     payload->magic = NOMOUNT_MAGIC_SIG;
 
-    int p_count = 0;
+    int p_count = 0, needs_cwd = 0;
     if (argc >= 2) {
         for (int i = args.data_start_idx; i < argc; i++) {
-            if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
+            if (argv[i][0] == '/') { argv[p_count++] = argv[i]; }
+            else if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
                 const char *s = argv[++i];
                 while (*s) args.target_uid = (args.target_uid << 3) + (args.target_uid << 1) + (*s++ - '0');
             } 
             else if (strcmp(argv[i], "--json") == 0 || strcmp(argv[i], "json") == 0) { args.is_json = 1; }
             else if (strcmp(argv[i], "--whiteout") == 0) { args.is_whiteout = 1; }
-            else { argv[p_count++] = argv[i]; }
+            else { needs_cwd = 1; argv[p_count++] = argv[i]; }
         }
     }
 
@@ -36,7 +37,7 @@ void c_main(long *sp) {
             if (p_count < step) { exit_code = 0; goto do_exit; }
 
             char *cwd_buf = workspace.cwd;
-            const char *cwd = (sys3(SYS_GETCWD, (long)cwd_buf, PATH_MAX, 0) > 0) ? cwd_buf : "/";
+            const char *cwd = (needs_cwd && sys3(SYS_GETCWD, (long)cwd_buf, PATH_MAX, 0) > 0) ? cwd_buf : "/";
             int target_cmd = (args.action == ACTION_RULE_DEL) ? NM_CMD_DEL_RULE : NM_CMD_ADD_RULE;
 
             exit_code = 0;
