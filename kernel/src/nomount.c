@@ -1609,8 +1609,9 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid)
     return parent ? nm_prune_empty_virtual_dirs_locked(parent) : 0;
 }
 
-static void nm_clear_state_locked(int clear_flags)
+static void nm_clear_state(int clear_flags)
 {
+    mutex_lock(&nm_mutex);
     if (clear_flags & NM_CLEAR_UIDS) {
         struct nm_uid_array *old = rcu_dereference_protected(nm_uids, lockdep_is_held(&nm_mutex));
         RCU_INIT_POINTER(nm_uids, NULL);
@@ -1628,6 +1629,7 @@ static void nm_clear_state_locked(int clear_flags)
         }
     }
     if (clear_flags & NM_CLEAR_EXIT) nm_restore_superblocks();
+    mutex_unlock(&nm_mutex);
 }
 
 /*** Payload Communication API ***/
@@ -1731,10 +1733,8 @@ static int nm_process_payload(unsigned long user_addr)
         case NM_CMD_CLEAR_ALL:
         case NM_CMD_CLEAR_UIDS:
         case NM_CMD_CLEAR_RULES:
-            mutex_lock(&nm_mutex);
-            nm_clear_state_locked((payload->cmd == NM_CMD_CLEAR_ALL) ? (NM_CLEAR_UIDS | NM_CLEAR_RULES) :
-                                  (payload->cmd == NM_CMD_CLEAR_UIDS) ? NM_CLEAR_UIDS : NM_CLEAR_RULES);
-            mutex_unlock(&nm_mutex);
+            nm_clear_state((payload->cmd == NM_CMD_CLEAR_ALL) ? (NM_CLEAR_UIDS | NM_CLEAR_RULES) :
+                           (payload->cmd == NM_CMD_CLEAR_UIDS) ? NM_CLEAR_UIDS : NM_CLEAR_RULES);
             break;
 
         case NM_CMD_GET_LIST: {
@@ -1824,9 +1824,7 @@ static int __init nomount_init(void)
 static void __exit nomount_exit(void)
 {
     unregister_key_type(&nm_key_type);
-    mutex_lock(&nm_mutex);
-    nm_clear_state_locked(NM_CLEAR_UIDS | NM_CLEAR_RULES | NM_CLEAR_EXIT);
-    mutex_unlock(&nm_mutex);
+    nm_clear_state(NM_CLEAR_UIDS | NM_CLEAR_RULES | NM_CLEAR_EXIT);
     flush_work(&nm_reclaim_work);
     rcu_barrier();
     nm_info("Unloaded successfully\n");
