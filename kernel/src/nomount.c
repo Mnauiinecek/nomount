@@ -1010,6 +1010,7 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
 
     if (injected) {
         dentry->d_op = &nm_owned_dops;
+        smp_wmb();
         dentry->d_flags &= ~DCACHE_OPS;
         dentry->d_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE | DCACHE_DONTCACHE);
     } else if (orig && iop) {
@@ -1027,9 +1028,11 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
             }
         }
         dentry->d_op = &iop->fake_dops;
+        smp_wmb();
         dentry->d_flags |= DCACHE_OP_REVALIDATE;
     } else if (!orig) {
         dentry->d_op = &nm_dops;
+        smp_wmb();
         dentry->d_flags &= ~DCACHE_OPS;
         dentry->d_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
     }
