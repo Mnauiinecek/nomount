@@ -1040,12 +1040,38 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
     spin_unlock(&dentry->d_lock);
 }
 
+static void nm_clear_dops_sb(struct super_block *sb)
+{
+    struct inode *inode;
+    struct dentry *dentry;
+    spin_lock(&sb->s_inode_list_lock);
+    list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+        spin_lock(&inode->i_lock);
+        hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
+            if (dentry->d_op && dentry->d_op->d_revalidate == nm_d_revalidate) {
+                spin_lock(&dentry->d_lock);
+                dentry->d_op = NULL;
+                dentry->d_flags &= ~(DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE |
+                                     DCACHE_OP_DELETE | DCACHE_OP_PRUNE |
+                                     DCACHE_OP_HASH | DCACHE_OP_COMPARE);
+#ifdef DCACHE_DONTCACHE
+                dentry->d_flags &= ~DCACHE_DONTCACHE;
+#endif
+                spin_unlock(&dentry->d_lock);
+            }
+        }
+        spin_unlock(&inode->i_lock);
+    }
+    spin_unlock(&sb->s_inode_list_lock);
+}
+
 static void nm_restore_superblocks(void)
 {
     struct nm_sop *nm_sop, *tmp;
     struct inode *inode;
     list_for_each_entry_safe(nm_sop, tmp, &nm_sb_list, list) {
         if (nm_sop->sb) {
+            nm_clear_dops_sb(nm_sop->sb);
             shrink_dcache_sb(nm_sop->sb);
             spin_lock(&nm_sop->sb->s_inode_list_lock);
             list_for_each_entry(inode, &nm_sop->sb->s_inodes, i_sb_list) {
