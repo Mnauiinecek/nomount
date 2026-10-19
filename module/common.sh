@@ -56,11 +56,6 @@ bootloop_check() {
     current=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
     [ -z "$current" ] && current="fallback-$(date +%s)"
 
-    if [ ! -f "$BOOT_SEMAPHORE" ] || [ ! -s "$BOOT_SEMAPHORE" ]; then
-        echo "=== NoMount Boot Log | Started: $(date) ===" > "$LOG_FILE"
-        echo "Kernel Version: $(uname -r)" >> "$LOG_FILE"
-    fi
-
     if [ -f "$BOOT_SEMAPHORE" ] && [ -s "$BOOT_SEMAPHORE" ]; then
         prev=$(cat "$BOOT_SEMAPHORE" 2>/dev/null || echo "MISSING")
         if [ "$prev" != "$current" ]; then
@@ -70,6 +65,8 @@ bootloop_check() {
             return 1
         fi
     else
+        echo "=== NoMount Boot Log | Started: $(date) ===" > "$LOG_FILE"
+        echo "Kernel Version: $(uname -r)" >> "$LOG_FILE"
         echo "$current" > "$BOOT_SEMAPHORE"
     fi
 
