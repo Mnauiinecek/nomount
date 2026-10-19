@@ -346,7 +346,7 @@ static struct dentry *nm_hijacked_lookup(struct inode *dir, struct dentry *dentr
 
     if (likely(orig_iop && orig_iop->lookup)) {
         target = (res = orig_iop->lookup(dir, dentry, flags)) ? res : dentry;
-        if (likely(!IS_ERR(target)))
+        if (likely(!IS_ERR(target)) && !nm_is_pseudo_fs(dir->i_sb))
             nm_hijack_dentry_ops(dir, target, false);
         return res;
     }
@@ -710,7 +710,8 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
 
     if (r_dir->i_op->lookup) {
         res = r_dir->i_op->lookup(r_dir, dentry, flags);
-        if (!IS_ERR(res ? res : dentry)) nm_hijack_dentry_ops(dir, res ? res : dentry, false);
+        if (!IS_ERR(res ? res : dentry) && !nm_is_pseudo_fs(r_dir->i_sb))
+            nm_hijack_dentry_ops(dir, res ? res : dentry, false);
         return res;
     }
     return ERR_PTR(-EOPNOTSUPP);

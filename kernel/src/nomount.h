@@ -10,6 +10,7 @@
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
 #include <linux/file.h>
+#include <linux/magic.h>
 #include <linux/key-type.h>
 #include <linux/highmem.h>
 #include <linux/version.h>
@@ -439,6 +440,27 @@ static inline int nm_call_orig_revalidate(const struct dentry_operations *dops, 
 
 static inline bool nm_inode_is_virtual(struct inode *inode) {
     return inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops;
+}
+
+static bool nm_is_pseudo_fs(struct super_block *sb)
+{
+    switch (sb->s_magic) {
+    case PROC_SUPER_MAGIC:
+    case SYSFS_MAGIC:
+    case DEVPTS_SUPER_MAGIC:
+    case DEBUGFS_MAGIC:
+    case TRACEFS_MAGIC:
+    case SECURITYFS_MAGIC:
+    case CGROUP_SUPER_MAGIC:
+#ifdef CGROUP2_SUPER_MAGIC
+    case CGROUP2_SUPER_MAGIC:
+#endif
+    case SELINUX_MAGIC:
+    case BPF_FS_MAGIC:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /* RCU read lock scope guard */
