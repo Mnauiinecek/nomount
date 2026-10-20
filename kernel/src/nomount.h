@@ -51,16 +51,15 @@ static struct nm_leaf *nm_retired_leaves;
 #define nm_rule_heap(arr) ((char *)(arr)->rules + (arr)->count * sizeof(struct nm_rule))
 
 struct nm_dir_ops {
-    struct inode_operations fake_iop;
-    struct file_operations fake_fop;
     const struct inode_operations *orig_iop;
     const struct file_operations *orig_fop;
     struct nm_dir_node *dir_node;
-    struct rcu_head rcu;
-
-    /* Dentry Operations Hijacking */
-    struct dentry_operations fake_dops;
     const struct dentry_operations *orig_dops;
+
+    struct inode_operations fake_iop;
+    struct file_operations fake_fop;
+    struct dentry_operations fake_dops;
+    struct rcu_head rcu;
 };
 
 struct nm_sop {
