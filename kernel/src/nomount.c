@@ -1003,6 +1003,7 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
 #define DCACHE_OPS (DCACHE_OP_HASH | DCACHE_OP_COMPARE | DCACHE_OP_DELETE | DCACHE_OP_PRUNE | DCACHE_OP_REAL)
     const struct dentry_operations *orig, *current_orig;
     struct nm_dir_ops *iop;
+    typeof(dentry->d_flags) new_flags;
 
     if (unlikely(!dentry || !dir)) return;
     iop = nm_get_nm_iop(smp_load_acquire(&dir->i_op));
@@ -1012,16 +1013,16 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
 
     spin_lock(&dentry->d_lock);
     orig = dentry->d_op;
-    if (orig == &nm_owned_dops || orig == &nm_dops || (iop && orig == &iop->fake_dops)) { 
-        spin_unlock(&dentry->d_lock); 
-        return; 
+    if (orig == &nm_owned_dops || orig == &nm_dops || (iop && orig == &iop->fake_dops)) {
+        spin_unlock(&dentry->d_lock);
+        return;
     }
 
     if (injected) {
+        new_flags = dentry->d_flags & ~DCACHE_OPS;
+        new_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE | DCACHE_DONTCACHE);
         dentry->d_op = &nm_owned_dops;
-        smp_wmb();
-        dentry->d_flags &= ~DCACHE_OPS;
-        dentry->d_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE | DCACHE_DONTCACHE);
+        smp_store_release(&dentry->d_flags, new_flags);
     } else if (orig && iop) {
         if (unlikely((current_orig = smp_load_acquire(&iop->orig_dops)) != orig)) {
             if (current_orig == NULL) {
@@ -1036,14 +1037,14 @@ static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool 
                 while (smp_load_acquire(&iop->orig_dops) == NM_DOP_INITIALIZING) cpu_relax();
             }
         }
+        new_flags = dentry->d_flags | DCACHE_OP_REVALIDATE;
         dentry->d_op = &iop->fake_dops;
-        smp_wmb();
-        dentry->d_flags |= DCACHE_OP_REVALIDATE;
+        smp_store_release(&dentry->d_flags, new_flags);
     } else if (!orig) {
+        new_flags = dentry->d_flags & ~DCACHE_OPS;
+        new_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
         dentry->d_op = &nm_dops;
-        smp_wmb();
-        dentry->d_flags &= ~DCACHE_OPS;
-        dentry->d_flags |= (DCACHE_OP_REVALIDATE | DCACHE_OP_WEAK_REVALIDATE);
+        smp_store_release(&dentry->d_flags, new_flags);
     }
 
     spin_unlock(&dentry->d_lock);
