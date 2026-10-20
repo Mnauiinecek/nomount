@@ -333,11 +333,13 @@ static struct dentry *nm_hijacked_lookup(struct inode *dir, struct dentry *dentr
     if (likely((nm_iop = nm_get_nm_iop(rcu_dereference(dir->i_op))))) {
         orig_iop = nm_iop->orig_iop;
         struct nm_dir_node *dir_node = rcu_dereference(nm_iop->dir_node);
-        struct nm_leaf *leaf = nm_find_leaf_in_dir(dir_node, dentry->d_name.name, dentry->d_name.len);
-        has_leaf = leaf != NULL;
-        if (has_leaf) {
-            uid_t fsuid = current_fsuid().val;
-            if (likely(!nm_is_uid_blocked(fsuid))) found = nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
+        if (likely(dir_node && rcu_access_pointer(dir_node->children))) {
+            struct nm_leaf *leaf = nm_find_leaf_in_dir(dir_node, dentry->d_name.name, dentry->d_name.len);
+            has_leaf = leaf != NULL;
+            if (has_leaf) {
+                uid_t fsuid = current_fsuid().val;
+                if (likely(!nm_is_uid_blocked(fsuid))) found = nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
+            }
         }
     }
     rcu_read_unlock();
@@ -688,18 +690,21 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
 {
     struct nm_inode_info *info = dir->i_private;
     struct nm_rule_info rule_info = {0};
+    struct nm_dir_node *dn;
     struct inode *r_dir;
     struct dentry *res;
     uid_t fsuid = current_fsuid().val;
-    bool has_leaf, found;
+    bool has_leaf = false, found = false;
 
     if (unlikely(!info || nm_is_uid_blocked(fsuid)))
         goto negative_dentry;
 
     rcu_read_lock();
-    struct nm_leaf *leaf = nm_find_leaf_in_dir(READ_ONCE(info->dir_node), dentry->d_name.name, dentry->d_name.len);
-    has_leaf = leaf != NULL;
-    found = leaf && nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
+    if (likely((dn = READ_ONCE(info->dir_node)) && rcu_access_pointer(dn->children))) {
+        struct nm_leaf *leaf = nm_find_leaf_in_dir(dn, dentry->d_name.name, dentry->d_name.len);
+        has_leaf = leaf != NULL;
+        found = leaf && nm_resolve_rule_from_leaf(leaf, fsuid, &rule_info);
+    }
     rcu_read_unlock();
     if (found) return nm_materialize_rule(dir, dentry, &rule_info);
 
@@ -788,15 +793,14 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
         parent_dir = rcu_dereference(iop->dir_node);
     }
 
-    if (!nm_is_uid_blocked(fsuid) && parent_dir) {
-        struct nm_leaf *leaf = nm_find_leaf_in_dir(parent_dir, name->name, name->len);
-        if (leaf && (rule = nm_select_rule(leaf, fsuid))) {
-            has_rule = true;
-            if (rule->flags & NM_FLAG_WHITEOUT)
-                whiteout = true;
-            else if (inode && (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops))
-                match_rule = nm_inode_matches_binding(inode, &rule->r_path, (rule->flags & NM_FLAG_IS_DIR) ? leaf->this_dir : NULL);
-        }
+    struct nm_leaf *leaf = (parent_dir && rcu_access_pointer(parent_dir->children))
+                            ? nm_find_leaf_in_dir(parent_dir, name->name, name->len) : NULL;
+    if (leaf && !nm_is_uid_blocked(fsuid) && (rule = nm_select_rule(leaf, fsuid))) {
+        has_rule = true;
+        if (rule->flags & NM_FLAG_WHITEOUT)
+            whiteout = true;
+        else if (inode && (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops))
+            match_rule = nm_inode_matches_binding(inode, &rule->r_path, (rule->flags & NM_FLAG_IS_DIR) ? leaf->this_dir : NULL);
     }
 
     orig_dops = nm_get_orig_dops(iop);
