@@ -339,9 +339,11 @@ static struct dentry *nm_hijacked_lookup(struct inode *dir, struct dentry *dentr
     if (likely((nm_iop = nm_get_nm_iop(rcu_dereference(dir->i_op))))) {
         orig_iop = nm_iop->orig_iop;
         uid_t fsuid = current_fsuid().val;
+        struct nm_dir_node *dir_node = rcu_dereference(nm_iop->dir_node);
         if (likely(!nm_is_uid_blocked(fsuid))) {
-            struct nm_dir_node *dir_node = rcu_dereference(nm_iop->dir_node);
             if (dir_node) found = nm_resolve_rule_with_leaf(dir_node, dentry->d_name.name, dentry->d_name.len, fsuid, &rule_info, &has_leaf);
+        } else {
+            has_leaf = nm_find_leaf_in_dir(dir_node, dentry->d_name.name, dentry->d_name.len) != NULL;
         }
     }
     rcu_read_unlock();
