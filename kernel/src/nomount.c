@@ -802,10 +802,11 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
     if (unlikely(!parent_inode)) return 1;
 
     rcu_read_lock();
-    if (parent_inode->i_op == &nm_dir_iops) {
+    const struct inode_operations *parent_iop = rcu_dereference(parent_inode->i_op);
+    if (parent_iop == &nm_dir_iops) {
         struct nm_inode_info *pinfo = rcu_dereference(parent_inode->i_private);
         parent_dir = pinfo ? pinfo->dir_node : NULL;
-    } else if ((iop = nm_get_nm_iop(rcu_dereference(parent_inode->i_op)))) {
+    } else if ((iop = nm_get_nm_iop(parent_iop))) {
         parent_dir = rcu_dereference(iop->dir_node);
     }
 
