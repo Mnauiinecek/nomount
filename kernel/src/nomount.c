@@ -1006,7 +1006,7 @@ static inline int nm_hijack_dir_ops(struct nm_dir_node *dir_node, struct inode *
     if (fop) smp_store_release(&inode->i_fop, &ops->fake_fop);
 
     nm_debug("Successfully hijacked VFS ops for parent dir (ino: %lu)\n", (unsigned long)inode->i_ino);
-    return 1;
+    return 0;
 }
 
 static void nm_hijack_dentry_ops(struct inode *dir, struct dentry *dentry, bool injected)
@@ -1381,15 +1381,10 @@ static int nm_generate_virtual_topology(struct nm_leaf *target, unsigned int uid
 
         if ((parent = nm_find_leaf(target->paths, parent_len))) {
             struct nm_rule *rule = nm_select_rule(parent, uid);
-            int hijacked = 0;
             if ((rule && !(rule->flags & NM_FLAG_IS_DIR)) || !parent->this_dir) { err = -ENOTDIR; break; }
-            if (parent->anchor.dentry && (hijacked = nm_hijack_dir_ops(parent->this_dir, d_backing_inode(parent->anchor.dentry))) < 0) {
-                err = hijacked;
-                break;
-            }
+            if (parent->anchor.dentry && (err = nm_hijack_dir_ops(parent->this_dir, d_backing_inode(parent->anchor.dentry)))) break;
             err = nm_inject_child_locked(parent->this_dir, child, name, name_len);
             if (!err && parent->anchor.dentry) {
-                if (hijacked > 0) shrink_dcache_parent(parent->anchor.dentry);
                 struct dentry *dentry = nm_hash_and_lookup(parent->anchor.dentry, &(struct qstr)QSTR_INIT(name, name_len));
                 if (dentry) { d_drop(dentry); dput(dentry); }
             }
@@ -1404,7 +1399,6 @@ static int nm_generate_virtual_topology(struct nm_leaf *target, unsigned int uid
         if (!found) {
             struct inode *inode = d_backing_inode(path.dentry);
             struct nm_dir_node *dir = NULL;
-            int hijacked = 0;
             bool virtual = inode->i_op == &nm_dir_iops;
             if (!S_ISDIR(inode->i_mode)) {
                 err = -ENOTDIR;
@@ -1419,11 +1413,9 @@ static int nm_generate_virtual_topology(struct nm_leaf *target, unsigned int uid
                 else dir = nm_alloc_dir_node();
                 if (!dir) err = -ENOMEM;
             }
-            if (!err && !virtual && (hijacked = nm_hijack_dir_ops(dir, inode)) < 0)
-                err = hijacked;
+            if (!err && !virtual) err = nm_hijack_dir_ops(dir, inode);
             if (!err && !(err = nm_inject_child_locked(dir, child, name, name_len))) {
                 if (!virtual && !dir->owner && !dir->pinned_dentry) dir->pinned_dentry = dget(path.dentry);
-                if (hijacked > 0) shrink_dcache_parent(path.dentry);
                 struct dentry *child = nm_hash_and_lookup(path.dentry, &(struct qstr)QSTR_INIT(name, name_len));
                 if (child) { d_drop(child); dput(child); }
             }
