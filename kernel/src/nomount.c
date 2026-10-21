@@ -778,12 +778,10 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
     struct inode *inode = READ_ONCE(dentry->d_inode);
     struct nm_dir_ops *iop = NULL;
     struct nm_rule *rule;
-    uid_t fsuid = current_fsuid().val;
-    bool owned, has_rule = false, whiteout = false, match_rule = false;
+    bool has_rule = false, whiteout = false, match_rule = false;
+    uid_t fsuid;
 
     if (unlikely(!parent_inode)) return 1;
-    owned = (READ_ONCE(dentry->d_op) == &nm_owned_dops) ||
-            (inode && (inode->i_op == &nm_file_iops || inode->i_op == &nm_dir_iops));
 
     rcu_read_lock();
     if (parent_inode->i_op == &nm_dir_iops) {
@@ -795,7 +793,7 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
 
     struct nm_leaf *leaf = (parent_dir && rcu_access_pointer(parent_dir->children))
                             ? nm_find_leaf_in_dir(parent_dir, name->name, name->len) : NULL;
-    if (leaf && !nm_is_uid_blocked(fsuid) && (rule = nm_select_rule(leaf, fsuid))) {
+    if (leaf && !nm_is_uid_blocked((fsuid = current_fsuid().val)) && (rule = nm_select_rule(leaf, fsuid))) {
         has_rule = true;
         if (rule->flags & NM_FLAG_WHITEOUT)
             whiteout = true;
@@ -803,12 +801,12 @@ static int nm_d_revalidate_common(struct inode *parent_inode, const struct qstr 
             match_rule = nm_inode_matches_binding(inode, &rule->r_path, (rule->flags & NM_FLAG_IS_DIR) ? leaf->this_dir : NULL);
     }
 
-    orig_dops = nm_get_orig_dops(iop);
+    if (!has_rule) orig_dops = nm_get_orig_dops(iop);
     rcu_read_unlock();
 
     if (whiteout) return !inode;
     if (match_rule) return 1;
-    if (has_rule || owned) goto drop_it;
+    if (has_rule || READ_ONCE(dentry->d_op) == &nm_owned_dops || (inode && nm_inode_is_virtual(inode))) goto drop_it;
 
     return nm_call_orig_revalidate(orig_dops, parent_inode, name, dentry, flags);
 
@@ -1595,7 +1593,6 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid)
 {
     struct nm_leaf *leaf;
     struct nm_rule_array *old, *array = NULL;
-    struct nm_dir_node *parent = NULL;
     int pos = 0, new_count;
     size_t heap_size = 0;
     bool stub_virtual = false;
@@ -1612,7 +1609,7 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid)
     }
 
     if (!stub_virtual && old->count == 1 && (!leaf->this_dir || !rcu_access_pointer(leaf->this_dir->children))) {
-        parent = nm_detach_leaf_locked(leaf);
+        struct nm_dir_node *parent = nm_detach_leaf_locked(leaf);
         if (IS_ERR(parent)) return PTR_ERR(parent);
         return parent ? nm_prune_empty_virtual_dirs_locked(parent) : 0;
     }
@@ -1644,7 +1641,7 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid)
 
     rcu_assign_pointer(leaf->rules, array);
     nm_retire_array_locked(old);
-    return parent ? nm_prune_empty_virtual_dirs_locked(parent) : 0;
+    return 0;
 }
 
 static void nm_clear_state(int clear_flags)
