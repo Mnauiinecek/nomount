@@ -96,6 +96,7 @@ struct nm_child_array {
 struct nm_dir_node {
     struct rcu_head rcu;
     struct nm_child_array __rcu *children;
+    int readdir_count;
     atomic_t refs;
     struct dentry *pinned_dentry;
     struct nm_leaf *owner;
@@ -123,6 +124,7 @@ struct nm_leaf {
     u32 v_hash;
     u16 v_len;
     u16 child_len;
+    bool native_file;
     struct hlist_node ht_node;
     struct nm_leaf *next;
     char paths[];
