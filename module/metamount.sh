@@ -45,11 +45,15 @@ for mod_path in "$MODULES_DIR"/*; do
         if [ -d "$mod_path/$partition" ]; then
             [ -d "/$partition" ] || [ -d "/system/$partition" ] || continue
             echo "[INFO] Mounting module: $mod_name (/$partition)" >> "$LOG_FILE"
-            find -L "$mod_path/$partition" \( -type d -o -type c -o -name ".replace" \) \
+            find -L "$mod_path/$partition" \( -type d -o -type c -o -name ".replace" -o -name ".remove" \) \
                 -exec sh "$MODDIR/rule-paths.sh" path "$mod_path" {} + 2>/dev/null \
                 | xargs -0 -r -n 200 "$LOADER" rule add --whiteout >> "$LOG_FILE" 2>&1
 
-            find -L "$mod_path/$partition" \( -type f -o -type l \) ! -name ".replace" \
+            find -L "$mod_path/$partition" -name ".replace" \
+                -exec sh "$MODDIR/rule-paths.sh" opaque "$mod_path" {} + 2>/dev/null \
+                | xargs -0 -r -n 200 "$LOADER" rule add --opaque >> "$LOG_FILE" 2>&1
+
+            find -L "$mod_path/$partition" \( -type f -o -type l \) ! -name ".replace" ! -name ".remove" \
                 -exec sh "$MODDIR/rule-paths.sh" pair "$mod_path" {} + 2>/dev/null \
                 | xargs -0 -r -n 200 "$LOADER" rule add >> "$LOG_FILE" 2>&1
         fi

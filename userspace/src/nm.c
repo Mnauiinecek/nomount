@@ -26,6 +26,7 @@ void c_main(long *sp) {
             } 
             else if (strcmp(argv[i], "--json") == 0 || strcmp(argv[i], "json") == 0) { args.is_json = 1; }
             else if (strcmp(argv[i], "--whiteout") == 0) { args.is_whiteout = 1; }
+            else if (strcmp(argv[i], "--opaque") == 0) { args.is_opaque = 1; }
             else { needs_cwd = 1; argv[p_count++] = argv[i]; }
         }
     }
@@ -33,6 +34,11 @@ void c_main(long *sp) {
     switch (args.action) {
         case ACTION_RULE_ADD:
         case ACTION_RULE_DEL: {
+            if (args.action == ACTION_RULE_ADD && args.is_whiteout && args.is_opaque) {
+                print_literal("nm: --whiteout and --opaque flags are mutually exclusive\n");
+                exit_code = 1;
+                goto do_exit;
+            }
             int step = (args.action == ACTION_RULE_ADD && !args.is_whiteout) ? 2 : 1;
             if (p_count < step) { exit_code = 0; goto do_exit; }
 
@@ -68,7 +74,8 @@ void c_main(long *sp) {
 
                 if (target_cmd == NM_CMD_ADD_RULE) {
                     struct nm_rule_hdr *h = (void *)cursor;
-                    h->flags = (args.is_whiteout) ? 4 : 0; h->uid = args.target_uid;
+                    h->flags = (args.is_whiteout ? 4 : 0) | (args.is_opaque ? 8 : 0);
+                    h->uid = args.target_uid;
                     h->v_len = v_len; h->r_len = r_len;
 
                     cursor = resolve_path(cursor + sizeof(*h), cwd, argv[i]);
@@ -180,20 +187,27 @@ void c_main(long *sp) {
                         char *r = data + pos; pos += rlen;
                         int is_white_flag  = (flags & 4);
                         int is_virtual_dir = (flags & 2);
+                        int is_opaque      = (flags & 8);
 
                         if (args.is_json) {
                             list_print_literal_offset(&output, ",\n  {\n    \"virtual\": \"", offset); offset = 0;
                             list_print_json_strn(&output, v, vlen);
                             if (is_white_flag) list_print_literal(&output, "\",\n    \"whiteout\": true");
                             else if (is_virtual_dir) list_print_literal(&output, "\",\n    \"virtual_dir\": true");
-                            else { list_print_literal(&output, "\",\n    \"real\": \""); list_print_json_strn(&output, r, rlen); list_print_literal(&output, "\""); }
+                            else {
+                                list_print_literal(&output, "\",\n    \"real\": \""); list_print_json_strn(&output, r, rlen); list_print_literal(&output, "\"");
+                                if (is_opaque) list_print_literal(&output, ",\n    \"opaque\": true");
+                            }
                             if (uid != 0) { list_print_literal(&output, ",\n    \"uid\": "); list_print_uint(&output, uid); }
                             list_print_literal(&output, "\n  }");
                         } else {
                             list_print_strn(&output, v, vlen);
                             if (is_white_flag) list_print_literal(&output, " (whiteout)");
                             else if (is_virtual_dir) list_print_literal(&output, " (virtual dir)");
-                            else { list_print_literal(&output, " -> "); list_print_strn(&output, r, rlen); }
+                            else {
+                                list_print_literal(&output, " -> "); list_print_strn(&output, r, rlen);
+                                if (is_opaque) list_print_literal(&output, " (opaque)");
+                            }
                             if (uid != 0) { list_print_literal(&output, " [UID: "); list_print_uint(&output, uid); list_print_literal(&output, "]"); }
                             list_print_literal(&output, "\n");
                         }
@@ -213,6 +227,8 @@ void c_main(long *sp) {
                 "Rule Commands:\n"
                 "  nm rule add <virtual_path> <real_path>  Add a path redirection\n"
                 "  nm rule add --whiteout <virtual_path>   Hide/whiteout a path\n"
+                "  nm rule add --opaque <virtual_dir> <real_dir>\n"
+                "                                          Add an opaque dir redirect\n"
                 "  nm rule del <virtual_path>              Delete a specific rule\n"
                 "  nm rule list [--json]                   List all active rules\n"
                 "  nm rule clear                           Clear all rules\n\n"

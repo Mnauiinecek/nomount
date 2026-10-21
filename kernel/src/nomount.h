@@ -27,6 +27,7 @@
 #define NM_FLAG_IS_DIR      (1 << 0)
 #define NM_FLAG_VIRTUAL_DIR (1 << 1)
 #define NM_FLAG_WHITEOUT    (1 << 2)
+#define NM_FLAG_OPAQUE      (1 << 3)
 
 /* flags for cleanup */
 #define NM_CLEAR_UIDS  (1 << 0)
@@ -97,6 +98,7 @@ struct nm_dir_node {
     atomic_t refs;
     struct dentry *pinned_dentry;
     struct nm_leaf *owner;
+    bool opaque;
 };
 
 struct nm_rule {

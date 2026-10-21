@@ -147,6 +147,7 @@ struct nm_args {
     int data_start_idx;
     int is_json;
     int is_whiteout;
+    int is_opaque;
     unsigned int target_uid;
 };
 
@@ -162,6 +163,7 @@ static noinline void parse_arguments(long argc, char **argv, struct nm_args *par
     parsed_args->data_start_idx = 2;
     parsed_args->is_json = 0;
     parsed_args->is_whiteout = 0;
+    parsed_args->is_opaque = 0;
     parsed_args->target_uid = 0;
 
     if (argc < 2) return;

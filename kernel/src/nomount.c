@@ -661,6 +661,12 @@ static int nm_dir_iterate_dir(struct file *file, struct dir_context *ctx)
     if (unlikely(nm_is_virtual_pos(ctx->pos)))
         goto emit_virtual;
 
+    if (dir_node && READ_ONCE(dir_node->opaque)) {
+        if (ctx->pos < 2 && !dir_emit_dots(file, ctx)) return 0;
+        ctx->pos = nm_pack_pos(0);
+        goto emit_virtual;
+    }
+
     if (real_file) {
         if (unlikely(uid_blocked || !dir_node))
             return nm_call_iterate(real_file, ctx, real_file->f_op);
@@ -707,6 +713,9 @@ static struct dentry *nm_dir_lookup(struct inode *dir, struct dentry *dentry, un
     }
     rcu_read_unlock();
     if (found) return nm_materialize_rule(dir, dentry, &rule_info);
+
+    if (dn && READ_ONCE(dn->opaque))
+        goto negative_dentry;
 
     if (!info->r_path.dentry || !(r_dir = d_backing_inode(info->r_path.dentry)))
         goto negative_dentry;
@@ -1251,7 +1260,7 @@ static struct nm_leaf *nm_alloc_leaf(const char *path, u16 len)
     return leaf;
 }
 
-static int nm_resolve_anchor_locked(struct nm_leaf *leaf)
+static int nm_resolve_anchor_locked(struct nm_leaf *leaf, u32 flags)
 {
     struct path anchor;
     struct inode *inode;
@@ -1279,7 +1288,7 @@ static int nm_resolve_anchor_locked(struct nm_leaf *leaf)
         iop = nm_get_nm_iop(smp_load_acquire(&inode->i_op));
         fop = nm_get_nm_fop(smp_load_acquire(&inode->i_fop));
         dir = iop ? iop->dir_node : (fop ? fop->dir_node : NULL);
-        if (dir && !dir->owner) {
+        if (dir && !dir->owner && !(flags & NM_FLAG_OPAQUE)) {
             leaf->this_dir = dir;
             atomic_inc(&dir->refs);
             dir->owner = leaf;
@@ -1290,6 +1299,7 @@ static int nm_resolve_anchor_locked(struct nm_leaf *leaf)
     leaf->this_dir = nm_alloc_dir_node();
     if (!leaf->this_dir) return -ENOMEM;
     leaf->this_dir->owner = leaf;
+    leaf->this_dir->opaque = !!(flags & NM_FLAG_OPAQUE);
     return 0;
 }
 
@@ -1512,7 +1522,7 @@ static int nm_add_rule_locked(const char *v_path, const char *r_path, u16 v_len,
     }
 
     if (fresh && (new_rule.flags & NM_FLAG_IS_DIR)) {
-        if ((err = nm_resolve_anchor_locked(leaf))) {
+        if ((err = nm_resolve_anchor_locked(leaf, new_rule.flags))) {
             nm_free_leaf(leaf);
             goto out_rule;
         }
@@ -1631,6 +1641,7 @@ static int nm_del_rule_locked(const char *path, u16 len, unsigned int uid)
             array->rules[j].target_uid = uid;
             array->rules[j].r_len = 0;
             array->rules[j].flags = NM_FLAG_IS_DIR | NM_FLAG_VIRTUAL_DIR;
+            if (old->rules[pos].flags & NM_FLAG_OPAQUE) WRITE_ONCE(leaf->this_dir->opaque, false);
             j++; old_h += old->rules[i].r_len;
             continue;
         }

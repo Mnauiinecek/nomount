@@ -800,9 +800,18 @@ async function loadModule(modId) {
         valid_dirs=""
         for p in ${TARGET_PARTITIONS}; do [ -d "$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && valid_dirs="$valid_dirs $p"; done
         [ -z "$valid_dirs" ] && exit 0
-        find -L $valid_dirs \\( -type d -o -type c -o -name ".replace" \\) -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add --whiteout
 
-        find -L $valid_dirs  \\( -type f -o -type l \\) ! -name ".replace" -exec sh "${RULE_PATHS}" pair "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add
+        find -L $valid_dirs \\( -type d -o -type c -o -name ".replace" -o -name ".remove" \\) \
+            -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null \
+            | xargs -0 -r -n 200 ${NM_BIN} rule add --whiteout
+
+        find -L $valid_dirs -name ".replace" \
+            -exec sh "${RULE_PATHS}" opaque "${modPath}" {} + 2>/dev/null \
+            | xargs -0 -r -n 200 ${NM_BIN} rule add --opaque
+
+        find -L $valid_dirs \\( -type f -o -type l \\) ! -name ".replace" ! -name ".remove" \
+            -exec sh "${RULE_PATHS}" pair "${modPath}" {} + 2>/dev/null \
+            | xargs -0 -r -n 200 ${NM_BIN} rule add
     `;
     try { await exec(script); } catch (e) { throw e; }
 }
@@ -814,7 +823,9 @@ async function unloadModule(modId) {
         valid_dirs=""
         for p in ${TARGET_PARTITIONS}; do [ -d "$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && valid_dirs="$valid_dirs $p"; done
         [ -z "$valid_dirs" ] && exit 0
-        find -L $valid_dirs \\( -type f -o -type l -o -type c -o -type d \\) -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule del
+        find -L $valid_dirs \\( -type f -o -type l -o -type c -o -type d \\) \
+            -exec sh "${RULE_PATHS}" del "${modPath}" {} + 2>/dev/null \
+            | xargs -0 -r -n 200 ${NM_BIN} rule del
     `;
     try { await exec(script); } catch (e) { throw e; }
 }
