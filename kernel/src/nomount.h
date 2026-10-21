@@ -76,6 +76,7 @@ struct nm_sop {
 struct nm_inode_info {
     struct path r_path;
     struct nm_dir_node *dir_node;
+    bool opaque;
     struct rcu_head rcu;
 };
 
@@ -98,7 +99,6 @@ struct nm_dir_node {
     atomic_t refs;
     struct dentry *pinned_dentry;
     struct nm_leaf *owner;
-    bool opaque;
 };
 
 struct nm_rule {
