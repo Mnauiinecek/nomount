@@ -133,12 +133,18 @@ _Static_assert(__builtin_offsetof(struct nm_workspace, payload) == 0, "payload m
 struct nm_rule_hdr {
     unsigned int flags;
     unsigned int uid;
+    unsigned int uid_end;
+    unsigned int deny_start;
+    unsigned int deny_end;
     unsigned short v_len;
     unsigned short r_len;
 } __attribute__((packed));
 
 struct nm_del_hdr {
     unsigned int uid;
+    unsigned int uid_end;
+    unsigned int deny_start;
+    unsigned int deny_end;
     unsigned short v_len;
 } __attribute__((packed));
 
@@ -149,6 +155,9 @@ struct nm_args {
     int is_whiteout;
     int is_opaque;
     unsigned int target_uid;
+    unsigned int target_uid_end;
+    unsigned int deny_start;
+    unsigned int deny_end;
 };
 
 /* --- UTILS --- */
@@ -165,6 +174,9 @@ static noinline void parse_arguments(long argc, char **argv, struct nm_args *par
     parsed_args->is_whiteout = 0;
     parsed_args->is_opaque = 0;
     parsed_args->target_uid = 0;
+    parsed_args->target_uid_end = 0;
+    parsed_args->deny_start = 0;
+    parsed_args->deny_end = 0;
 
     if (argc < 2) return;
 

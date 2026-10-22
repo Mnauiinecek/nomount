@@ -22,8 +22,38 @@ void c_main(long *sp) {
             if (argv[i][0] == '/') { argv[p_count++] = argv[i]; }
             else if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
                 const char *s = argv[++i];
-                while (*s) args.target_uid = (args.target_uid << 3) + (args.target_uid << 1) + (*s++ - '0');
-            } 
+                unsigned int uid = 0;
+                while (*s) uid = (uid << 3) + (uid << 1) + (*s++ - '0');
+                args.target_uid = uid;
+                args.target_uid_end = uid;
+            }
+            else if (strcmp(argv[i], "--uid-range") == 0 && i + 1 < argc) {
+                const char *s = argv[++i];
+                if (strcmp(s, "all") == 0) {
+                    args.target_uid = 0;
+                    args.target_uid_end = 0xFFFFFFFFU;
+                } else {
+                    unsigned int start = 0, end = 0;
+                    while (*s && *s != '-') start = (start << 3) + (start << 1) + (*s++ - '0');
+                    if (*s == '-') s++;
+                    if (*s) while (*s) end = (end << 3) + (end << 1) + (*s++ - '0');
+                    else end = start;
+                    if (end < start) { unsigned int t = start; start = end; end = t; }
+                    args.target_uid = start;
+                    args.target_uid_end = end;
+                }
+            }
+            else if (strcmp(argv[i], "--uid-excluded") == 0 && i + 1 < argc) {
+                const char *s = argv[++i];
+                unsigned int start = 0, end = 0;
+                while (*s && *s != '-') start = (start << 3) + (start << 1) + (*s++ - '0');
+                if (*s == '-') s++;
+                if (*s) while (*s) end = (end << 3) + (end << 1) + (*s++ - '0');
+                else end = start;
+                if (end < start) { unsigned int t = start; start = end; end = t; }
+                args.deny_start = start;
+                args.deny_end = end;
+            }
             else if (strcmp(argv[i], "--json") == 0 || strcmp(argv[i], "json") == 0) { args.is_json = 1; }
             else if (strcmp(argv[i], "--whiteout") == 0) { args.is_whiteout = 1; }
             else if (strcmp(argv[i], "--opaque") == 0) { args.is_opaque = 1; }
@@ -38,6 +68,18 @@ void c_main(long *sp) {
                 print_literal("nm: --whiteout and --opaque flags are mutually exclusive\n");
                 exit_code = 1;
                 goto do_exit;
+            }
+            if (args.deny_start || args.deny_end) {
+                if (!args.deny_start || !args.deny_end) {
+                    print_literal("nm: --uid-excluded requires a valid range\n");
+                    exit_code = 1;
+                    goto do_exit;
+                }
+                if (args.deny_start < args.target_uid || args.deny_end > args.target_uid_end) {
+                    print_literal("nm: --uid-excluded must be inside --uid / --uid-range\n");
+                    exit_code = 1;
+                    goto do_exit;
+                }
             }
             int step = (args.action == ACTION_RULE_ADD && !args.is_whiteout) ? 2 : 1;
             if (p_count < step) { exit_code = 0; goto do_exit; }
@@ -75,7 +117,8 @@ void c_main(long *sp) {
                 if (target_cmd == NM_CMD_ADD_RULE) {
                     struct nm_rule_hdr *h = (void *)cursor;
                     h->flags = (args.is_whiteout ? 4 : 0) | (args.is_opaque ? 8 : 0);
-                    h->uid = args.target_uid;
+                    h->uid = args.target_uid; h->uid_end = args.target_uid_end;
+                    h->deny_start = args.deny_start; h->deny_end = args.deny_end;
                     h->v_len = v_len; h->r_len = r_len;
 
                     cursor = resolve_path(cursor + sizeof(*h), cwd, argv[i]);
@@ -83,6 +126,8 @@ void c_main(long *sp) {
                 } else {
                     struct nm_del_hdr *h = (void *)cursor;
                     h->uid = args.target_uid; h->v_len = v_len;
+                    h->uid_end = args.target_uid_end;
+                    h->deny_start = args.deny_start; h->deny_end = args.deny_end;
 
                     cursor = resolve_path(cursor + sizeof(*h), cwd, argv[i]);
                 }
@@ -179,7 +224,8 @@ void c_main(long *sp) {
                         offset = 0;
                     } else {
                         struct nm_rule_hdr *h = (void *)(data + pos);
-                        unsigned int flags = h->flags, uid = h->uid;
+                        unsigned int flags = h->flags, uid = h->uid, uid_end = h->uid_end;
+                        unsigned int deny_start = h->deny_start, deny_end = h->deny_end;
                         unsigned short vlen = h->v_len, rlen = h->r_len;
                         pos += sizeof(*h);
 
@@ -198,7 +244,17 @@ void c_main(long *sp) {
                                 list_print_literal(&output, "\",\n    \"real\": \""); list_print_json_strn(&output, r, rlen); list_print_literal(&output, "\"");
                                 if (is_opaque) list_print_literal(&output, ",\n    \"opaque\": true");
                             }
-                            if (uid != 0) { list_print_literal(&output, ",\n    \"uid\": "); list_print_uint(&output, uid); }
+                            if (uid || uid_end || deny_start || deny_end) {
+                                if (uid == 0 && uid_end == 0) list_print_literal(&output, ",\n    \"default\": true");
+                                else {
+                                    list_print_literal(&output, ",\n    \"uid\": "); list_print_uint(&output, uid);
+                                    list_print_literal(&output, ",\n    \"uid_end\": "); list_print_uint(&output, uid_end);
+                                }
+                                if (deny_start) {
+                                    list_print_literal(&output, ",\n    \"deny_start\": "); list_print_uint(&output, deny_start);
+                                    list_print_literal(&output, ",\n    \"deny_end\": "); list_print_uint(&output, deny_end);
+                                }
+                            }
                             list_print_literal(&output, "\n  }");
                         } else {
                             list_print_strn(&output, v, vlen);
@@ -208,7 +264,18 @@ void c_main(long *sp) {
                                 list_print_literal(&output, " -> "); list_print_strn(&output, r, rlen);
                                 if (is_opaque) list_print_literal(&output, " (opaque)");
                             }
-                            if (uid != 0) { list_print_literal(&output, " [UID: "); list_print_uint(&output, uid); list_print_literal(&output, "]"); }
+                            if (uid || uid_end) {
+                                list_print_literal(&output, " [UID: ");
+                                if (uid == 0 && uid_end == 0) list_print_literal(&output, "all");
+                                else if (uid == uid_end) list_print_uint(&output, uid);
+                                else { list_print_uint(&output, uid); list_print_literal(&output, "-"); list_print_uint(&output, uid_end); }
+                                if (deny_start) {
+                                    list_print_literal(&output, " excl ");
+                                    if (deny_start == deny_end) list_print_uint(&output, deny_start);
+                                    else { list_print_uint(&output, deny_start); list_print_literal(&output, "-"); list_print_uint(&output, deny_end); }
+                                }
+                                list_print_literal(&output, "]");
+                            }
                             list_print_literal(&output, "\n");
                         }
                     }
@@ -229,7 +296,12 @@ void c_main(long *sp) {
                 "  nm rule add --whiteout <virtual_path>   Hide/whiteout a path\n"
                 "  nm rule add --opaque <virtual_dir> <real_dir>\n"
                 "                                          Add an opaque dir redirect\n"
+                "  nm rule add [--uid <u> | --uid-range <a>-<b> | --uid-range all]\n"
+                "              [--uid-excluded <c>-<d>] <vpath> <rpath>\n"
+                "                                          Scope the rule to a UID set\n"
+                "                                          (default: applies to all UIDs)\n"
                 "  nm rule del <virtual_path>              Delete a specific rule\n"
+                "  nm rule del [same UID options] <vpath>  Delete a rule matching the UID scope\n"
                 "  nm rule list [--json]                   List all active rules\n"
                 "  nm rule clear                           Clear all rules\n\n"
                 "UID Commands (Exceptions):\n"
