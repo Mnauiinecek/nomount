@@ -16,7 +16,7 @@
 #include <linux/version.h>
 #include <linux/compat.h>
 
-#define NOMOUNT_BASE_VERSION "21"
+#define NOMOUNT_BASE_VERSION "22"
 #ifdef NOMOUNT_COMMIT_COUNT
     #define NOMOUNT_VERSION ""NOMOUNT_BASE_VERSION" ("NOMOUNT_COMMIT_COUNT")"
 #else

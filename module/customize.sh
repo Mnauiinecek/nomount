@@ -181,9 +181,53 @@ else
   fi
 fi
 
+NM_REQUIRED_VER=22
+NM_CURRENT_VER=$("$MODPATH/bin/nm" version 2>/dev/null | head -1 | grep -oE '^[0-9]+' | head -1)
+NM_CURRENT_VER=${NM_CURRENT_VER:-0}
+
+if [ "$NM_CURRENT_VER" -lt "$NM_REQUIRED_VER" ]; then
+  if [ "$BUILTIN" = true ]; then
+    ui_print " "
+    ui_print "***************************************************"
+    ui_print "* [!] BUILT-IN DRIVER TOO OLD                     *"
+    ui_print "***************************************************"
+    ui_print "* Built-in driver: v${NM_CURRENT_VER}             *"
+    ui_print "* Required:        v${NM_REQUIRED_VER}            *"
+    ui_print "*                                                 *"
+    ui_print "* This kernel has an older NoMount built into it. *"
+    ui_print "* Flash a kernel with v${NM_REQUIRED_VER}+, or    *"
+    ui_print "* downgrade to NoMount v2.1.x.                    *"
+    ui_print "***************************************************"
+    ui_print " "
+    abort "! Built-in driver v${NM_CURRENT_VER} incompatible (v${NM_REQUIRED_VER} required)"
+  elif [ "$STAGED_FOR_REBOOT" = true ]; then
+    ui_print "  [!] Current driver: v${NM_CURRENT_VER}; this module requires v${NM_REQUIRED_VER}+"
+    ui_print "  [!] A v${NM_REQUIRED_VER} driver is staged for the next boot."
+    ui_print "  [!] Do NOT use 'nm rule' or 'nm uid' until you reboot:"
+    ui_print "      the v${NM_REQUIRED_VER} CLI cannot talk to the v${NM_CURRENT_VER} driver."
+  else
+    ui_print " "
+    ui_print "***************************************************"
+    ui_print "* [!] KERNEL DRIVER TOO OLD                       *"
+    ui_print "***************************************************"
+    ui_print "* Current driver: v${NM_CURRENT_VER}              *"
+    ui_print "* Required:       v${NM_REQUIRED_VER}             *"
+    ui_print "*                                                 *"
+    ui_print "* No compatible driver update is available for    *"
+    ui_print "* this kernel. Update your kernel first, then     *"
+    ui_print "* reinstall this module. If you cannot update    *"
+    ui_print "* the kernel, downgrade to NoMount v2.1.x.        *"
+    ui_print "***************************************************"
+    ui_print " "
+    abort "! Kernel driver v${NM_CURRENT_VER} incompatible (v${NM_REQUIRED_VER} required)"
+  fi
+fi
+
 if [ "$STAGED_FOR_REBOOT" = true ]; then
   ui_print "  [OK] Update staged. Reboot to activate the new driver."
-  ui_print "       The running driver keeps working until then."
+  if [ "$NM_CURRENT_VER" -ge "$NM_REQUIRED_VER" ]; then
+    ui_print "       The current driver keeps working until then."
+  fi
 else
   ui_print "  [OK] System is ready for injection."
 fi
