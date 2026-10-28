@@ -1,5 +1,5 @@
 #!/system/bin/sh
-
+MODDIR=${0%/*}
 . "$MODDIR/common.sh"
 
 if [ -f "$BOOT_SEMAPHORE" ]; then
