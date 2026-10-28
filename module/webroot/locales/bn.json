@@ -81,5 +81,7 @@
   "advanced_color": "উন্নত রঙ",
   "done": "সম্পন্ন",
   "modules_skip": "বাদ দিন",
-  "modules_unskip": "বাদ দেবেন না"
+  "modules_unskip": "বাদ দেবেন না",
+  "dump_rules": "Dump rules",
+  "dump_rules_desc": "Dump all rules into android log. Only enable for debugging."
 }
