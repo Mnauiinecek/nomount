@@ -1086,7 +1086,11 @@ static void nm_clear_dops_sb(struct super_block *sb)
     spin_lock(&sb->s_inode_list_lock);
     list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
         spin_lock(&inode->i_lock);
+#ifdef for_each_alias
+        for_each_alias(dentry, inode) {
+#else
         hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
+#endif
             if (dentry->d_op && dentry->d_op->d_revalidate == nm_d_revalidate) {
                 spin_lock(&dentry->d_lock);
                 dentry->d_op = NULL;
