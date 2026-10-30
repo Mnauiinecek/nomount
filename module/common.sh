@@ -85,6 +85,13 @@ bootloop_check() {
 }
 
 ensure_lkm_loaded() {
+    local config_grep="$(zcat /proc/config.gz | grep CONFIG_NOMOUNT)"
+    if [ "$config_grep" = "CONFIG_NOMOUNT=y" ]; then
+      klog "Built-in driver detected, skipping..."
+      exec 7>&-
+      return 0
+    fi
+
     exec 7>"$NOMOUNT_DATA/.lkm.lock"
     if ! _lock_fd 7 60; then
         klogerr "LKM lock timed out after 60s"
